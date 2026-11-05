@@ -1,0 +1,26 @@
+[package]
+name = "ai-agent"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["TeamMeng <862915265@qq.com>"]
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints.rust]
+unsafe_code = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
