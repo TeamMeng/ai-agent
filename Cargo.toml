@@ -10,6 +10,10 @@ license = "MIT"
 name = "stream_chat"
 path = "examples/stream_chat.rs"
 
+[[example]]
+name = "tool_call_complete"
+path = "examples/tool_call_complete.rs"
+
 [dependencies]
 anyhow = "1.0"
 async-openai = { version = "0.43.0", features = ["chat-completion"] }
