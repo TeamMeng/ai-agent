@@ -1,4 +1,4 @@
-use ai_agent::{llm::complete::chat_complete, tools::tools};
+use ai_agent::{llm::complete::chat_complete, tools::build_toolbox};
 use anyhow::Result;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
@@ -8,7 +8,7 @@ const MODEL: &str = "deepseek-flash";
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
-    let tools = tools();
+    let toolbox = build_toolbox();
 
     tracing_subscriber::registry()
         .with(fmt::layer())
@@ -19,19 +19,11 @@ async fn main() -> Result<()> {
         MODEL,
         Some("你是一个全能的助手"),
         "5876乘以675是多少？",
-        tools,
+        &toolbox,
     )
     .await?;
 
     println!("Response: {}", content);
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(1 + 1, 2);
-    }
 }

@@ -18,6 +18,7 @@ path = "examples/tool_call_complete.rs"
 anyhow = "1.0"
 async-openai = { version = "0.43.0", features = ["chat-completion"] }
 async-stream = "0.3.6"
+async-trait = "0.1.92"
 backon = "1.6.0"
 dotenvy = "0.15.7"
 futures = "0.3.34"
