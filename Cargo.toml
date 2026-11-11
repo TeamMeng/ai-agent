@@ -14,12 +14,17 @@ path = "examples/stream_chat.rs"
 name = "tool_call_complete"
 path = "examples/tool_call_complete.rs"
 
+[[example]]
+name = "agent_runtime"
+path = "examples/agent_runtime.rs"
+
 [dependencies]
 anyhow = "1.0"
 async-openai = { version = "0.43.0", features = ["chat-completion"] }
 async-stream = "0.3.6"
 async-trait = "0.1.92"
 backon = "1.6.0"
+chrono = { version = "0.4.45", features = ["serde"] }
 dotenvy = "0.15.7"
 futures = "0.3.34"
 schemars = "1.2.3"
@@ -28,6 +33,7 @@ serde_json = "1.0.154"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.26.1", features = ["v4"] }
 
 [lints.rust]
 unsafe_code = "warn"
