@@ -5,9 +5,14 @@ use async_openai::types::chat::{
     ChatCompletionRequestUserMessageArgs, ChatCompletionTools, CreateChatCompletionRequestArgs,
     FunctionCall, ReasoningEffort,
 };
+use serde_json::Value;
+use std::sync::Arc;
 
 use crate::{
-    agent::{ContentItem, Event, ExecutionContext, ToolResultStatus},
+    agent::{
+        ContentItem, Event, ExecutionContext, ToolResultStatus,
+        callback::{AfterToolCallback, BeforeToolCallback, ToolCallView},
+    },
     tools::ToolBox,
 };
 
@@ -22,6 +27,8 @@ pub struct Agent<'a> {
     instruction: Option<&'a str>,
     toolbox: &'a ToolBox,
     max_steps: u32,
+    before_tool_callbacks: Vec<Arc<dyn BeforeToolCallback>>,
+    after_tool_callbacks: Vec<Arc<dyn AfterToolCallback>>,
 }
 
 impl<'a> Agent<'a> {
@@ -31,11 +38,23 @@ impl<'a> Agent<'a> {
             instruction,
             toolbox,
             max_steps: 10,
+            before_tool_callbacks: Vec::new(),
+            after_tool_callbacks: Vec::new(),
         }
     }
 
     pub fn with_max_steps(mut self, max_steps: u32) -> Self {
         self.max_steps = max_steps;
+        self
+    }
+
+    pub fn with_before_tool_callback(mut self, callback: Arc<dyn BeforeToolCallback>) -> Self {
+        self.before_tool_callbacks.push(callback);
+        self
+    }
+
+    pub fn with_after_tool_callback(mut self, callback: Arc<dyn AfterToolCallback>) -> Self {
+        self.after_tool_callbacks.push(callback);
         self
     }
 
@@ -245,24 +264,53 @@ impl<'a> Agent<'a> {
 
             tracing::info!("Tool call: {}({})", function_name, arguments);
 
-            let (status, content) = match self.toolbox.get(function_name) {
-                Some(tool) => match tool.execute(arguments, context).await {
-                    Ok(result) => {
-                        tracing::info!("Tool result: {}", result);
-                        (ToolResultStatus::Success, result)
-                    }
-                    Err(err) => {
-                        let msg = format!("Tool execution error: {}", err);
+            let arguments_value = serde_json::from_str(arguments).unwrap_or(Value::Null);
+            let view = ToolCallView {
+                tool_call_id: &function_call.id,
+                name: function_name,
+                arguments: &arguments_value,
+            };
+
+            let mut short_circuited = None;
+            for call_back in &self.before_tool_callbacks {
+                if let Some(result) = call_back.call(context, view).await {
+                    short_circuited = Some(result);
+                    break;
+                }
+            }
+
+            let (mut status, mut content) = match short_circuited {
+                Some(result) => (ToolResultStatus::Success, result),
+                None => match self.toolbox.get(function_name) {
+                    Some(tool) => match tool.execute(arguments, context).await {
+                        Ok(result) => {
+                            tracing::info!("Tool result: {}", result);
+                            (ToolResultStatus::Success, result)
+                        }
+                        Err(err) => {
+                            let msg = format!("Tool execution error: {}", err);
+                            tracing::error!("{}", msg);
+                            (ToolResultStatus::Error, msg)
+                        }
+                    },
+                    None => {
+                        let msg = format!("Tool execution error: unknown tool {}", function_name);
                         tracing::error!("{}", msg);
                         (ToolResultStatus::Error, msg)
                     }
                 },
-                None => {
-                    let msg = format!("Tool execution error: unknown tool {}", function_name);
-                    tracing::error!("{}", msg);
-                    (ToolResultStatus::Error, msg)
-                }
             };
+
+            for callback in &self.after_tool_callbacks {
+                if let Some((new_status, new_content)) = callback
+                    .call(context, &function_call.id, function_name, status, &content)
+                    .await
+                {
+                    status = new_status;
+                    content = new_content;
+                    break;
+                }
+            }
 
             result_items.push(ContentItem::ToolResult {
                 tool_call_id: function_call.id.clone(),

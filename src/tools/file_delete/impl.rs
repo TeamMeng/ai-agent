@@ -2,10 +2,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{
-    agent::ExecutionContext,
-    tools::{file_delete::execute::delete, tool::Tool},
-};
+use crate::{agent::ExecutionContext, tools::tool::Tool};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct DeleteFileArgs {
@@ -35,9 +32,17 @@ impl Tool for DeleteFileTool {
         _context: &ExecutionContext,
     ) -> anyhow::Result<String> {
         let args: DeleteFileArgs = serde_json::from_str(args_json)?;
-        match delete(&args.file_path) {
-            Ok(message) => Ok(message),
-            Err(err) => Ok(format!("Error: {err}")),
+        tracing::info!("Attempting to delete: {}", args.file_path);
+        match std::fs::remove_file(&args.file_path) {
+            Ok(()) => {
+                tracing::info!("Deleted: {}", args.file_path);
+                Ok(format!("File {} has been deleted", args.file_path))
+            }
+            Err(e) => {
+                let msg = format!("Failed to delete {}: {}", args.file_path, e);
+                tracing::error!(msg);
+                Err(anyhow::anyhow!(msg))
+            }
         }
     }
 }
