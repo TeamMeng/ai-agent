@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use ai_agent::{agent::Agent, tools::build_file_explorer_toolbox};
+use ai_agent::{
+    agent::Agent,
+    callback::{approval::ApprovalCallback, search_compressor::SearchCompressorCallback},
+    tools::build_file_explorer_toolbox,
+};
 use anyhow::Result;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
@@ -22,9 +26,14 @@ async fn main() -> Result<()> {
 靠文件名判断哪些文件可能相关，用 read_file 或 read_image 逐一确认，
 最后再给出结论。不要跳过探索步骤直接猜答案。"#;
 
-    let agent = Agent::new(MODEL, Some(instructions), &toolbox).with_max_steps(20);
+    let agent = Agent::new(MODEL, Some(instructions), &toolbox)
+        .with_max_steps(20)
+        .with_before_tool_callback(Arc::new(ApprovalCallback::new(["delete_file"])))
+        .with_after_tool_callback(Arc::new(SearchCompressorCallback));
 
-    let result = agent.run("查看当前目录有哪些文件?").await?;
+    let result = agent
+        .run("查看当前目录有哪些文件? 删除一下 hello.txt 这个文件")
+        .await?;
 
     println!("Result: {}", result.output);
     println!(
