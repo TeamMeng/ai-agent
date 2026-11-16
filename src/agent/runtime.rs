@@ -12,6 +12,7 @@ use crate::{
     agent::{
         ContentItem, Event, ExecutionContext, ToolResultStatus,
         callback::{AfterToolCallback, BeforeToolCallback, ToolCallView},
+        llm_request::{BeforeLlmCallback, LlmRequest},
     },
     tools::ToolBox,
 };
@@ -29,6 +30,7 @@ pub struct Agent<'a> {
     max_steps: u32,
     before_tool_callbacks: Vec<Arc<dyn BeforeToolCallback>>,
     after_tool_callbacks: Vec<Arc<dyn AfterToolCallback>>,
+    before_llm_callbacks: Vec<Arc<dyn BeforeLlmCallback>>,
 }
 
 impl<'a> Agent<'a> {
@@ -40,6 +42,7 @@ impl<'a> Agent<'a> {
             max_steps: 10,
             before_tool_callbacks: Vec::new(),
             after_tool_callbacks: Vec::new(),
+            before_llm_callbacks: Vec::new(),
         }
     }
 
@@ -55,6 +58,11 @@ impl<'a> Agent<'a> {
 
     pub fn with_after_tool_callback(mut self, callback: Arc<dyn AfterToolCallback>) -> Self {
         self.after_tool_callbacks.push(callback);
+        self
+    }
+
+    pub fn with_before_llm_callback(mut self, callback: Arc<dyn BeforeLlmCallback>) -> Self {
+        self.before_llm_callbacks.push(callback);
         self
     }
 
@@ -96,7 +104,8 @@ impl<'a> Agent<'a> {
                 );
             }
 
-            let messages = self.build_messages(&context)?;
+            let llm_request = self.prepare_llm_request(&mut context).await;
+            let messages = self.build_messages(&llm_request)?;
 
             let request = CreateChatCompletionRequestArgs::default()
                 .model(self.model)
@@ -145,7 +154,7 @@ impl<'a> Agent<'a> {
 
     fn build_messages(
         &self,
-        context: &ExecutionContext,
+        request: &LlmRequest,
     ) -> anyhow::Result<Vec<ChatCompletionRequestMessage>> {
         let mut messages = Vec::new();
 
@@ -158,69 +167,91 @@ impl<'a> Agent<'a> {
             );
         }
 
-        for event in &context.events {
-            for item in &event.content {
-                match item {
-                    ContentItem::Message { role, content } => {
-                        let message: ChatCompletionRequestMessage = if role == "user" {
-                            ChatCompletionRequestUserMessageArgs::default()
-                                .content(content.clone())
-                                .build()?
-                                .into()
-                        } else {
-                            ChatCompletionRequestAssistantMessageArgs::default()
-                                .content(content.clone())
-                                .build()?
-                                .into()
-                        };
-                        messages.push(message);
-                    }
-                    ContentItem::ToolCall {
-                        tool_call_id,
-                        name,
-                        arguments,
-                    } => {
-                        let tool_call = ChatCompletionMessageToolCalls::Function(
-                            ChatCompletionMessageToolCall {
-                                id: tool_call_id.to_string(),
-                                function: FunctionCall {
-                                    name: name.clone(),
-                                    arguments: arguments.to_string(),
-                                },
-                            },
-                        );
+        for extra_instruction in request.instructions.iter() {
+            messages.push(
+                ChatCompletionRequestSystemMessageArgs::default()
+                    .content(extra_instruction.as_str())
+                    .build()?
+                    .into(),
+            );
+        }
 
-                        if let Some(ChatCompletionRequestMessage::Assistant(last)) =
-                            messages.last_mut()
-                        {
-                            last.tool_calls.get_or_insert_with(Vec::new).push(tool_call);
-                        } else {
-                            messages.push(
-                                ChatCompletionRequestAssistantMessageArgs::default()
-                                    .tool_calls(vec![tool_call])
-                                    .build()?
-                                    .into(),
-                            );
-                        }
-                    }
-                    ContentItem::ToolResult {
-                        tool_call_id,
-                        content,
-                        ..
-                    } => {
+        for item in &request.contents {
+            match item {
+                ContentItem::Message { role, content } => {
+                    let message: ChatCompletionRequestMessage = if role == "user" {
+                        ChatCompletionRequestUserMessageArgs::default()
+                            .content(content.clone())
+                            .build()?
+                            .into()
+                    } else {
+                        ChatCompletionRequestAssistantMessageArgs::default()
+                            .content(content.clone())
+                            .build()?
+                            .into()
+                    };
+                    messages.push(message);
+                }
+                ContentItem::ToolCall {
+                    tool_call_id,
+                    name,
+                    arguments,
+                } => {
+                    let tool_call =
+                        ChatCompletionMessageToolCalls::Function(ChatCompletionMessageToolCall {
+                            id: tool_call_id.to_string(),
+                            function: FunctionCall {
+                                name: name.clone(),
+                                arguments: arguments.to_string(),
+                            },
+                        });
+
+                    if let Some(ChatCompletionRequestMessage::Assistant(last)) = messages.last_mut()
+                    {
+                        last.tool_calls.get_or_insert_with(Vec::new).push(tool_call);
+                    } else {
                         messages.push(
-                            ChatCompletionRequestToolMessageArgs::default()
-                                .tool_call_id(tool_call_id.clone())
-                                .content(content.clone())
+                            ChatCompletionRequestAssistantMessageArgs::default()
+                                .tool_calls(vec![tool_call])
                                 .build()?
                                 .into(),
                         );
                     }
                 }
+                ContentItem::ToolResult {
+                    tool_call_id,
+                    content,
+                    ..
+                } => {
+                    messages.push(
+                        ChatCompletionRequestToolMessageArgs::default()
+                            .tool_call_id(tool_call_id.clone())
+                            .content(content.clone())
+                            .build()?
+                            .into(),
+                    );
+                }
             }
         }
 
         Ok(messages)
+    }
+
+    async fn prepare_llm_request(&self, context: &mut ExecutionContext) -> LlmRequest {
+        let mut request = LlmRequest {
+            instructions: Vec::new(),
+            contents: context
+                .events
+                .iter()
+                .flat_map(|ev| ev.content.iter().cloned())
+                .collect(),
+        };
+
+        for cb in self.before_llm_callbacks.iter() {
+            cb.call(context, &mut request).await;
+        }
+
+        request
     }
 
     fn record_tool_calls(
