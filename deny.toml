@@ -6,7 +6,11 @@ no-default-features = false
 feature-depth = 1
 
 [advisories]
-ignore = []
+ignore = [
+  # chrono is unmaintained as of 2026-11-17; no patched version exists.
+  # Tracked for migration to jiff/time.
+  "RUSTSEC-2026-0543",
+]
 
 [licenses]
 allow = [
