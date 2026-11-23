@@ -1,5 +1,6 @@
 use crate::agent::llm_request::LlmRequest;
 
+pub mod compaction;
 pub mod sliding_window;
 
 pub fn count_tokens(_model: &str, request: &LlmRequest) -> usize {
