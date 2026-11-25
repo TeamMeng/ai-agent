@@ -22,6 +22,10 @@ path = "examples/agent_runtime.rs"
 name = "file_explorer"
 path = "examples/file_explorer.rs"
 
+[[example]]
+name = "test_context_optimizer"
+path = "examples/test_context_optimizer.rs"
+
 [dependencies]
 anyhow = "1.0"
 async-openai = { version = "0.43.0", features = [
